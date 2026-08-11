@@ -20,7 +20,10 @@ DEFAULT_MAX_ROWS = 250
 # yfinance SDK), A-shares and HK equities to the never-banned Tencent endpoint.
 _SOURCE_PATTERNS = [
     (re.compile(r"^local:", re.I), "local"),
-    (re.compile(r"^\d{6}\.(SZ|SH|BJ)$", re.I), "tencent"),
+    # A-shares prefer the local, offline, never-banned Hikyuu store (the head of
+    # the a_share fallback chain). When Hikyuu is absent/broken, the registry
+    # degrades to tencent/mootdx/eastmoney/... automatically.
+    (re.compile(r"^\d{6}\.(SZ|SH|BJ)$", re.I), "hikyuu"),
     (re.compile(r"^[A-Z]+\.US$", re.I), "yahoo"),
     (re.compile(r"^\d{3,5}\.HK$", re.I), "tencent"),
     # India: NSE (RELIANCE.NS) / BSE (500325.BO). Tickers may carry '&' and '-'
