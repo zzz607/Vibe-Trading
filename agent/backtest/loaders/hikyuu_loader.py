@@ -107,11 +107,13 @@ class DataLoader:
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"hikyuu import failed: {exc}") from exc
 
+        logger.info("[hikyuu] calling hikyuu.load_hikyuu() (one-time bootstrap)")
         try:
             load_hikyuu()
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"hikyuu load_hikyuu() failed: {exc}") from exc
 
+        logger.info("[hikyuu] calling StockManager.instance()")
         self._sm = StockManager.instance()
         self._Query = Query
         self._Datetime = Datetime
@@ -178,6 +180,10 @@ class DataLoader:
                     result[code] = df
             except Exception as exc:
                 logger.warning("hikyuu failed for %s: %s", code, exc)
+        logger.info(
+            "[hikyuu] OHLCV fetch interval=%s -> %d symbol(s) served from local store",
+            interval, len(result),
+        )
         return result
 
     def _fetch_one(
@@ -189,9 +195,10 @@ class DataLoader:
             return None
         market_prefix, symbol = parsed
 
+        logger.info("[hikyuu] calling StockManager.get_stock('%s%s')", market_prefix, symbol)
         stock = sm.get_stock(f"{market_prefix}{symbol}")
         if stock is None:
-            logger.warning("hikyuu: unknown stock %s", code)
+            logger.warning("[hikyuu] StockManager.get_stock(%s) -> None (unknown stock)", code)
             return None
 
         Query = self._Query
@@ -199,6 +206,10 @@ class DataLoader:
         ktype = getattr(Query, _INTERVAL_KTYPE[interval])
         # ``Query.FORWARD`` returns forward-adjusted (前复权) bars, so historical
         # prices reflect splits/dividends relative to the latest quote.
+        logger.info(
+            "[hikyuu] calling Stock.get_kdata(Query.%s, FORWARD) for %s [%s, %s]",
+            _INTERVAL_KTYPE[interval], code, start_date, end_date,
+        )
         kdata = stock.get_kdata(
             Query(
                 Datetime(start_date),

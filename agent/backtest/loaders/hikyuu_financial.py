@@ -84,7 +84,9 @@ class HikyuuFinancial:
             from hikyuu import StockManager, load_hikyuu
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"hikyuu import failed: {exc}") from exc
+        logger.info("[hikyuu] calling hikyuu.load_hikyuu() (one-time bootstrap)")
         load_hikyuu()
+        logger.info("[hikyuu] calling StockManager.instance()")
         self._sm = StockManager.instance()
         return self._sm
 
@@ -126,15 +128,17 @@ class HikyuuFinancial:
         market_prefix, symbol = parsed
 
         sm = self._ensure_initialized()
+        logger.info("[hikyuu] calling StockManager.get_stock('%s%s')", market_prefix, symbol)
         stock = sm.get_stock(f"{market_prefix}{symbol}")
         if stock is None:
-            logger.warning("hikyuu financial: unknown stock %s", code)
+            logger.warning("[hikyuu] StockManager.get_stock(%s) -> None (unknown stock)", code)
             return None
 
+        logger.info("[hikyuu] calling Stock.get_history_finance() for %s", code)
         try:
             history = stock.get_history_finance()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("hikyuu financial: history failed for %s: %s", code, exc)
+            logger.warning("[hikyuu] Stock.get_history_finance() failed for %s: %s", code, exc)
             return None
 
         prefixes = _STATEMENT_PREFIXES[statement]
@@ -151,7 +155,12 @@ class HikyuuFinancial:
 
         rows.sort(key=lambda r: r["REPORT_DATE"], reverse=True)
         if not rows:
+            logger.info("[hikyuu] %s: no %s/%s rows in local store (will fall back)", code, statement, period)
             return None
+        logger.info(
+            "[hikyuu] %s statement=%s period=%s -> %d report period(s) from local store",
+            code, statement, period, min(len(rows), max_periods),
+        )
         return rows[:max_periods]
 
 
@@ -190,6 +199,7 @@ def _indexed_names(fields: Any, prefix: str):
     global _field_index_map
     if _field_index_map is None:
         from hikyuu import StockManager  # noqa: PLC0415 - lazy
+        logger.info("[hikyuu] calling StockManager.get_history_finance_all_fields() (one-time cache)")
         _field_index_map = {
             name: idx for idx, name in StockManager.instance().get_history_finance_all_fields()
         }

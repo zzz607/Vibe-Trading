@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 _FIELD_HOLDER = "股本股东_股东人数"
 _FIELD_LIUTONG = "股本股东_已上市流通A股"
 _FIELD_ZONGGUBEN = "股本股东_总股本"
+_FIELD_INDICES = (_FIELD_HOLDER, _FIELD_LIUTONG, _FIELD_ZONGGUBEN)
 
 # Hard cap on returned periods, matching the Eastmoney tool.
 _MAX_PERIODS = 24
@@ -66,12 +67,18 @@ class HikyuuShareholder:
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"hikyuu import failed: {exc}") from exc
 
+        logger.info("[hikyuu] calling hikyuu.load_hikyuu() (one-time bootstrap)")
         load_hikyuu()
+        logger.info("[hikyuu] calling StockManager.instance()")
         sm = StockManager.instance()
         # Cache the field indices so we don't re-query them per fetch.
+        logger.info(
+            "[hikyuu] calling StockManager.get_history_finance_field_index() for %d field(s)",
+            len(_FIELD_INDICES),
+        )
         self._field_index = {
             name: sm.get_history_finance_field_index(name)
-            for name in (_FIELD_HOLDER, _FIELD_LIUTONG, _FIELD_ZONGGUBEN)
+            for name in _FIELD_INDICES
         }
         self._Query = Query
         self._sm = sm
@@ -108,20 +115,27 @@ class HikyuuShareholder:
         market_prefix, symbol = parsed
 
         sm = self._ensure_initialized()
+        logger.info("[hikyuu] calling StockManager.get_stock('%s%s')", market_prefix, symbol)
         stock = sm.get_stock(f"{market_prefix}{symbol}")
         if stock is None:
-            logger.warning("hikyuu: unknown stock %s", code)
+            logger.warning("[hikyuu] StockManager.get_stock(%s) -> None (unknown stock)", code)
             return None
 
+        logger.info("[hikyuu] calling Stock.get_history_finance() for %s", code)
         try:
             history = stock.get_history_finance()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("hikyuu: get_history_finance failed for %s: %s", code, exc)
+            logger.warning("[hikyuu] Stock.get_history_finance() failed for %s: %s", code, exc)
             return None
 
         periods = self._build_periods(code, stock, history)
         if not periods:
+            logger.info("[hikyuu] %s: no shareholder data in local store (will fall back)", code)
             return None
+        logger.info(
+            "[hikyuu] %s shareholder-count -> %d report period(s) from local store",
+            code, min(len(periods), max_periods),
+        )
         return periods[:max_periods]
 
     # -- internals --------------------------------------------------------- #
@@ -202,6 +216,10 @@ class HikyuuShareholder:
         except Exception:  # noqa: BLE001
             return None
         start = Datetime(end_date)
+        logger.debug(
+            "[hikyuu] calling Stock.get_kdata(Query.DAY, FORWARD) for %s close price",
+            end_date,
+        )
         kdata = stock.get_kdata(
             self._Query(
                 start,
