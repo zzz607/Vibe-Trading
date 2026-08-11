@@ -108,6 +108,9 @@ class TestSuccessEnvelope:
             "src.tools.financial_statements_tool.resolve_secid",
             return_value="1.600519",
         ), patch(
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            return_value={"error": "no hikyuu"},
+        ), patch(
             "src.tools.financial_statements_tool.get_json",
             return_value=_EM_A_PAYLOAD,
         ) as mock_get:
@@ -221,6 +224,9 @@ class TestAllFailedSurfacesError:
             "src.tools.financial_statements_tool.resolve_secid",
             return_value="1.600519",
         ), patch(
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            return_value={"error": "no hikyuu"},
+        ), patch(
             "src.tools.financial_statements_tool.get_json",
             side_effect=RuntimeError("HTTP 429"),
         ):
@@ -251,6 +257,9 @@ class TestAllFailedSurfacesError:
         with patch(
             "src.tools.financial_statements_tool.resolve_secid",
             return_value="0.000001",
+        ), patch(
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            return_value={"error": "no hikyuu"},
         ), patch(
             "src.tools.financial_statements_tool.get_json",
             return_value={"result": {}},
@@ -293,6 +302,11 @@ class TestPeriodSelection:
              code="600519.SH", secid="1.600519"):
         with patch(
             "src.tools.financial_statements_tool.resolve_secid", return_value=secid,
+        ), patch(
+            # A-share prefers hikyuu first; force a hikyuu miss so these tests
+            # exercise the Eastmoney path (the fallback).
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            return_value={"error": "no hikyuu"},
         ), patch(
             "src.tools.financial_statements_tool.get_json", return_value=payload,
         ) as mock_get:
@@ -359,3 +373,81 @@ class TestErrorEnvelope:
         )
         assert payload["ok"] is False
         assert "period" in payload["error"]
+
+
+class TestHikyuuRouting:
+    """A-share prefers the local Hikyuu store; HK/US never use it."""
+
+    _HK = [{"REPORT_DATE": "2024-12-31", "利润表_营业收入": 100.0}]
+
+    def test_a_share_prefers_hikyuu_and_skips_eastmoney(self):
+        with patch(
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            return_value={"periods": self._HK},
+        ) as mock_hk:
+            with patch(
+                "src.tools.financial_statements_tool._fetch_eastmoney_statement",
+                side_effect=AssertionError("eastmoney must not be hit"),
+            ):
+                text = FinancialStatementsTool().execute(
+                    code="600519.SH", statement="income", period="annual"
+                )
+
+        payload = json.loads(text)
+        assert payload["ok"] is True
+        assert payload["source"] == "hikyuu"
+        assert payload["data"]["600519.SH"]["periods"][0]["利润表_营业收入"] == 100.0
+        mock_hk.assert_called_once()
+
+    def test_a_share_falls_back_when_hikyuu_has_no_data(self):
+        with patch(
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            return_value={"error": "no hikyuu"},
+        ):
+            with patch(
+                "src.tools.financial_statements_tool._fetch_eastmoney_statement",
+                return_value={"periods": [{"REPORT_DATE": "2024-12-31", "TOTAL_ASSETS": 1}]},
+            ) as mock_em:
+                text = FinancialStatementsTool().execute(
+                    code="600519.SH", statement="balance", period="annual"
+                )
+
+        payload = json.loads(text)
+        assert payload["ok"] is True
+        assert payload["source"] == "eastmoney"
+        mock_em.assert_called_once()
+
+    def test_hk_never_uses_hikyuu(self):
+        with patch(
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            side_effect=AssertionError("hikyuu must not be hit"),
+        ):
+            with patch(
+                "src.tools.financial_statements_tool._fetch_eastmoney_statement",
+                return_value={"periods": [{"REPORT_DATE": "2024-12-31"}]},
+            ):
+                text = FinancialStatementsTool().execute(
+                    code="00700.HK", statement="income", period="annual"
+                )
+
+        payload = json.loads(text)
+        assert payload["source"] == "eastmoney"
+
+    def test_us_never_uses_hikyuu(self):
+        with patch(
+            "src.tools.financial_statements_tool._fetch_hikyuu_statement",
+            side_effect=AssertionError("hikyuu must not be hit"),
+        ):
+            with patch(
+                "src.tools.financial_statements_tool.cik_for",
+                return_value="0000320193",
+            ), patch(
+                "src.tools.financial_statements_tool.get_company_facts",
+                return_value=_SEC_FACTS,
+            ):
+                text = FinancialStatementsTool().execute(
+                    code="AAPL.US", statement="income", period="annual"
+                )
+
+        payload = json.loads(text)
+        assert payload["source"] == "sec_edgar"

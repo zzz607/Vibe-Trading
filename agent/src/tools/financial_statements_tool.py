@@ -289,6 +289,31 @@ def _fetch_eastmoney_statement(
     return {"periods": _cap_periods(periods)}
 
 
+def _fetch_hikyuu_statement(
+    code: str, *, statement: str, period: str
+) -> dict[str, Any]:
+    """Fetch an A-share statement from the local Hikyuu store.
+
+    Lazily imports ``hikyuu_financial`` so the tool stays importable when Hikyuu
+    is absent. Returns ``{"periods": [...]}`` on success or ``{"error": ...}``
+    when Hikyuu is unavailable, cannot be initialized, or has no data (the
+    caller then falls back to Eastmoney).
+    """
+    try:
+        from backtest.loaders.hikyuu_financial import HikyuuFinancial
+    except Exception:  # noqa: BLE001 - hikyuu not installed
+        return {"error": "hikyuu unavailable"}
+    try:
+        periods = HikyuuFinancial().fetch(
+            code, statement=statement, period=period, max_periods=_MAX_PERIODS
+        )
+    except Exception as exc:  # noqa: BLE001 - any init/fetch failure -> fall back
+        return {"error": str(exc)}
+    if not periods:
+        return {"error": "no financial data in hikyuu local store"}
+    return {"periods": periods}
+
+
 def _to_number(value: Any) -> float | None:
     """Coerce a numeric provider cell to float, preserving missing values."""
     if value in (None, "", "-"):
@@ -679,6 +704,17 @@ class FinancialStatementsTool(BaseTool):
         if market == "us":
             result = _fetch_sec_statement(code, statement=statement, period=period)
             source = "sec_edgar"
+        elif market == "a_share":
+            # Prefer the local Hikyuu store (offline, no network); fall back to
+            # the Eastmoney datacenter when Hikyuu is unavailable or has no data.
+            result = _fetch_hikyuu_statement(code, statement=statement, period=period)
+            if "error" in result:
+                result = _fetch_eastmoney_statement(
+                    code, statement=statement, period=period
+                )
+                source = "eastmoney"
+            else:
+                source = "hikyuu"
         else:
             result = _fetch_eastmoney_statement(
                 code, statement=statement, period=period
