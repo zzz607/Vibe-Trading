@@ -78,7 +78,7 @@ class ShareholderCountTool(BaseTool):
 
         Returns:
             A JSON string envelope. On success:
-            ``{"ok": true, "market": "CN", "source": "eastmoney",
+            ``{"ok": true, "market": "CN", "source": "hikyuu"|"eastmoney",
             "data": {"code", "periods": [...]}}``. On failure:
             ``{"ok": false, "error": str}``.
         """
@@ -96,6 +96,20 @@ class ShareholderCountTool(BaseTool):
             return _error(f"could not resolve A-share symbol '{code}'")
 
         limit = _clamp_periods(kwargs.get("max_periods", _MAX_PERIODS))
+
+        # Prefer the local Hikyuu store (offline, no network); fall back to the
+        # Eastmoney datacenter when Hikyuu is unavailable or has no data.
+        periods = _fetch_hikyuu(code, limit)
+        if periods is not None:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "market": "CN",
+                    "source": "hikyuu",
+                    "data": {"code": code, "periods": periods},
+                },
+                ensure_ascii=False,
+            )
 
         try:
             payload = get_json(
@@ -137,6 +151,24 @@ def _clamp_periods(value: Any) -> int:
     except (TypeError, ValueError, OverflowError):
         return _MAX_PERIODS
     return max(1, min(n, _MAX_PERIODS))
+
+
+def _fetch_hikyuu(code: str, limit: int) -> list[dict] | None:
+    """Try the local Hikyuu store for shareholder counts.
+
+    Lazily imports ``hikyuu_shareholder`` so the tool remains importable when
+    Hikyuu is absent. Returns the periods list on success, or ``None`` when
+    Hikyuu is unavailable, cannot be initialized, or has no data for ``code``
+    (the ``auto`` path then falls back to Eastmoney).
+    """
+    try:
+        from backtest.loaders.hikyuu_shareholder import HikyuuShareholder
+    except Exception:  # noqa: BLE001 - hikyuu not installed
+        return None
+    try:
+        return HikyuuShareholder().fetch(code, max_periods=limit)
+    except Exception:  # noqa: BLE001 - any init/fetch failure -> fall back
+        return None
 
 
 def _parse_periods(payload: Any) -> list[dict]:
