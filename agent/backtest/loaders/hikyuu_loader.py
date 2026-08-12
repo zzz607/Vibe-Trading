@@ -32,11 +32,23 @@ from backtest.loaders.registry import register
 logger = logging.getLogger(__name__)
 
 # Interval -> Hikyuu Query ktype constant name. Hikyuu exposes these as
-# ``Query.DAY`` / ``Query.WEEK`` / ``Query.MONTH``.
+# ``Query.DAY`` / ``Query.WEEK`` / ``Query.MONTH``. Include the common
+# human-readable aliases (e.g. ``1wk`` / ``week``) so a caller asking for a
+# weekly bar is not spuriously rejected just because of label spelling.
 _INTERVAL_KTYPE: dict[str, str] = {
     "1D": "DAY",
+    "1d": "DAY",
+    "day": "DAY",
+    "daily": "DAY",
+    "d": "DAY",
     "1W": "WEEK",
+    "1w": "WEEK",
+    "1wk": "WEEK",
+    "week": "WEEK",
+    "weekly": "WEEK",
     "1M": "MONTH",
+    "month": "MONTH",
+    "monthly": "MONTH",
 }
 
 
