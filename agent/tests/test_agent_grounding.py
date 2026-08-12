@@ -1894,3 +1894,52 @@ def test_in_text_decimal_survives_list_marker_mask(
     ):
         result = ledger.validate_final_answer(draft)
         assert result.valid is True, (draft, result.issues)
+
+
+def test_price_validation_ignores_markdown_heading_numbers(
+    tmp_path: Path,
+) -> None:
+    """Markdown heading section numbers ("### 6.1") are prose, not prices (#BUGS-1 sibling).
+
+    A report written with numbered headings ("### 6.1 价格走势总览") must not let
+    the heading's "6.1" be parsed as a float and rejected against the observed
+    OHLC range (7.9-8.5) as a numeric_claim_conflict. The list-marker mask only
+    covers a digit run at line start, so a heading number (preceded by "### ")
+    slips through — this test pins that gap closed.
+    """
+    ledger = _screened_ledger(tmp_path)
+    symbol = "000543.SZ"
+
+    for draft in (
+        f"### 6.1 价格走势总览\n\n{symbol} 最新收盘价 8.2 CNY（source: tencent）",
+        f"## 5.1 估值分析\n\n{symbol} 收盘价 8.2 CNY（source: tencent）",
+        f"# 4.2 财务分析\n\n{symbol} 收盘价 8.2 CNY（source: tencent）",
+        f"### 6.4 关键支撑位\n\n{symbol} 收盘价 8.2 CNY（source: tencent）",
+    ):
+        result = ledger.validate_final_answer(draft)
+        assert result.valid is True, (draft, result.issues)
+
+
+def test_markdown_heading_mask_does_not_weaken_contradiction_check(
+    tmp_path: Path,
+) -> None:
+    """Masking heading numbers must not shield a genuinely out-of-range quote.
+
+    A wrong quote sitting in a numbered heading section is still caught, so the
+    mask is span-local: it removes only the heading's section number, not a
+    contradicted price that appears elsewhere in the draft.
+    """
+    ledger = _screened_ledger(tmp_path)
+    symbol = "000543.SZ"
+
+    result = ledger.validate_final_answer(
+        f"### 6.1 价格走势总览\n\n{symbol} 收盘价 42.00 CNY（source: tencent）"
+    )
+
+    codes = [issue["code"] for issue in result.issues]
+    assert "numeric_claim_conflict" in codes
+    assert [
+        issue["value"]
+        for issue in result.issues
+        if issue["code"] == "numeric_claim_conflict"
+    ] == [42.0]
