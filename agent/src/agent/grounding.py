@@ -429,6 +429,36 @@ def _normalize_symbol(value: Any) -> str:
     return f"{base}.{suffix}"
 
 
+# Broad market benchmark instruments that any locked identity may query as
+# reference context (e.g. comparing a single stock against its broad market
+# index). These are session-scoped reference instruments, not analysis targets:
+# they never trigger ``identity_mismatch``, and they are NOT counted as
+# authorized session identities. ``_normalize_symbol`` is already defined above,
+# so every entry is canonical and directly comparable to a consumer argument.
+_BENCHMARK_SYMBOLS: frozenset[str] = frozenset(
+    _normalize_symbol(s)
+    for s in {
+        # China A-share broad market indices
+        "000001.SH",  # SSE Composite
+        "000016.SH",  # SSE 50
+        "000300.SH",  # CSI 300
+        "000688.SH",  # STAR 50
+        "000852.SH",  # CSI 1000
+        "000905.SH",  # CSI 500
+        "399001.SZ",  # SZSE Component
+        "399005.SZ",  # SME Board
+        "399006.SZ",  # ChiNext
+        # US equity benchmarks
+        "SPY",        # S&P 500 ETF
+        "QQQ",        # Nasdaq-100 ETF
+        "DIA",        # Dow Jones ETF
+        "IWM",        # Russell 2000 ETF
+        # Crypto reference
+        "BTC-USDT",   # BTC reference
+    }
+)
+
+
 def _symbol_from_csv_filename(stem: str) -> str | None:
     """Map a run-dir CSV stem back to a canonical project symbol.
 
@@ -887,10 +917,17 @@ class GroundingLedger:
                 symbols=symbols,
             )
 
+        # Broad market benchmarks are reference context for any locked identity,
+        # not analysis targets, so they are allowed regardless of the locked
+        # set. They must still be canonical; a non-benchmark symbol that differs
+        # from the locked identity stays blocked as identity_mismatch.
         mismatched = tuple(
             symbol
             for symbol in symbols
-            if self._match_authorized_symbol(symbol, authorized) is None
+            if (
+                _normalize_symbol(symbol) not in _BENCHMARK_SYMBOLS
+                and self._match_authorized_symbol(symbol, authorized) is None
+            )
         )
         if mismatched:
             return ToolAuthorization(

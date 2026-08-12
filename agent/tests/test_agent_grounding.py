@@ -381,6 +381,70 @@ def test_provider_spellings_of_one_instrument_are_one_identity(
     assert authorization.allowed is True
 
 
+@pytest.mark.parametrize(
+    "benchmark",
+    [
+        "000300.SH",  # CSI 300
+        "000001.SH",  # SSE Composite
+        "000905.SH",  # CSI 500
+        "000852.SH",  # CSI 1000
+        "000016.SH",  # SSE 50
+        "000688.SH",  # STAR 50
+        "399001.SZ",  # SZSE Component
+        "399005.SZ",  # SME Board
+        "399006.SZ",  # ChiNext
+        "SPY",        # S&P 500 ETF
+        "QQQ",        # Nasdaq-100 ETF
+        "DIA",        # Dow Jones ETF
+        "IWM",        # Russell 2000 ETF
+        "BTC-USDT",   # BTC reference
+    ],
+)
+def test_benchmark_index_is_allowed_as_reference_for_locked_stock(
+    tmp_path: Path,
+    benchmark: str,
+) -> None:
+    """Analyzing one stock may query a broad market benchmark for context.
+
+    The benchmark symbol is reference context, not an analysis target, so it
+    does not trigger identity_mismatch and it is not added to the locked set.
+    """
+    ledger = GroundingLedger(
+        run_dir=tmp_path,
+        user_message="分析 605507.SH 是否值得买入",
+    )
+
+    authorization = ledger.authorize_tool_call(
+        "get_market_data",
+        {"codes": [benchmark]},
+        batch_authorized_symbols=ledger.authorized_symbols,
+        call_id="benchmark",
+    )
+
+    assert ledger.authorized_symbols == {"605507.SH"}
+    assert authorization.allowed is True
+
+
+def test_benchmark_index_does_not_authorize_non_benchmark_identity(
+    tmp_path: Path,
+) -> None:
+    """The benchmark allowance must not leak onto an unrelated single stock."""
+    ledger = GroundingLedger(
+        run_dir=tmp_path,
+        user_message="分析 605507.SH 是否值得买入",
+    )
+
+    authorization = ledger.authorize_tool_call(
+        "get_market_data",
+        {"codes": ["000001.SZ"]},
+        batch_authorized_symbols=ledger.authorized_symbols,
+        call_id="unrelated",
+    )
+
+    assert authorization.allowed is False
+    assert authorization.error_code == "identity_mismatch"
+
+
 def test_stale_history_identity_does_not_unlock_new_subject(tmp_path: Path) -> None:
     """A previous turn's AAPL identity cannot authorize a SpaceX price request."""
     ledger = GroundingLedger(
