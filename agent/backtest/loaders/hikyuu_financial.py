@@ -31,15 +31,67 @@ logger = logging.getLogger(__name__)
 # Hard cap on returned periods, matching the Eastmoney tool's _MAX_PERIODS.
 _MAX_PERIODS = 40
 
-# statement -> list of Hikyuu field prefixes to collect (order = output order).
-# balance/income/cashflow map to the corresponding report prefix.
+# statement -> list of Hikyuu field names to collect (order = output order).
+#
+# Each entry is an *exact* Hikyuu account field name (verified against
+# ``StockManager.get_history_finance_all_fields()``). Collecting an explicit
+# core-field whitelist (rather than every field under a ``_``-suffixed prefix)
+# keeps each period small enough that the full period series fits under the
+# tool's character limit without paging. balance/income/cashflow use their
+# corresponding report-prefixed names; indicators mixes bare per-share fields
+# (no prefix) with a curated set of ratio-group fields.
 _STATEMENT_PREFIXES: dict[str, List[str]] = {
-    "balance": ["资产负债表_"],
-    "income": ["利润表_"],
-    "cashflow": ["现金流量表_"],
+    "balance": [
+        "资产负债表_货币资金",
+        "资产负债表_应收票据",
+        "资产负债表_应收账款",
+        "资产负债表_预付款项",
+        "资产负债表_其他应收款",
+        "资产负债表_存货",
+        "资产负债表_流动资产合计",
+        "资产负债表_固定资产",
+        "资产负债表_在建工程",
+        "资产负债表_无形资产",
+        "资产负债表_商誉",
+        "资产负债表_资产总计",
+        "资产负债表_应付票据",
+        "资产负债表_应付账款",
+        "资产负债表_其他应付款",
+        "资产负债表_短期借款",
+        "资产负债表_长期借款",
+        "资产负债表_应付债券",
+        "资产负债表_流动负债合计",
+        "资产负债表_负债合计",
+        "资产负债表_所有者权益（或股东权益）合计",
+        "资产负债表_未分配利润",
+        "资产负债表_实收资本（或股本）",
+    ],
+    "income": [
+        "利润表_营业收入",
+        "利润表_营业成本",
+        "利润表_营业税金及附加",
+        "利润表_销售费用",
+        "利润表_管理费用",
+        "利润表_财务费用",
+        "利润表_研发费用",
+        "利润表_营业利润",
+        "利润表_利润总额",
+        "利润表_净利润",
+        "利润表_归属于母公司所有者的净利润",
+        "利润表_稀释每股收益",
+    ],
+    "cashflow": [
+        "现金流量表_销售商品、提供劳务收到的现金",
+        "现金流量表_经营活动产生的现金流量净额",
+        "现金流量表_投资活动产生的现金流量净额",
+        "现金流量表_购建固定资产、无形资产和其他长期资产支付的现金",
+        "现金流量表_筹资活动产生的现金流量净额",
+        "现金流量表_分配股利、利润或偿付利息支付的现金",
+        "现金流量表_现金及现金等价物净增加额",
+    ],
     # indicators = per-share metrics + financial-ratio groups. The per-share
     # fields have no underscore prefix (index < 7), so they are listed as
-    # exact names; the ratio groups are collected by prefix.
+    # exact names; the ratio groups are collected by exact field name.
     "indicators": [
         "基本每股收益",
         "扣除非经常性损益每股收益",
@@ -48,12 +100,18 @@ _STATEMENT_PREFIXES: dict[str, List[str]] = {
         "每股资本公积金",
         "净资产收益率",
         "每股经营现金流量",
-        "盈利能力_",
-        "成长能力_",
-        "偿债能力_",
-        "营运能力_",
-        "资本结构_",
-        "现金能力_",
+        "盈利能力_销售毛利率",
+        "盈利能力_销售净利率",
+        "盈利能力_总资产报酬率",
+        "盈利能力_扣除非经常性损益后的净利润",
+        "成长能力_营业收入增长率",
+        "成长能力_净利润增长率",
+        "偿债能力_流动比率",
+        "偿债能力_速动比率",
+        "资本结构_资产负债率",
+        "营运能力_总资产周转率",
+        "营运能力_存货周转率",
+        "现金能力_每股经营性现金流",
     ],
 }
 
@@ -176,8 +234,9 @@ def _collect_fields(fields: Any, prefixes: List[str]) -> dict:
     """Map the raw 584-field row to a dict keyed by Hikyuu Chinese account names.
 
     Fields are collected in ``prefixes`` order so output is deterministic. A
-    prefix ending in ``_`` matches any field name starting with it; a bare
-    prefix matches the exact field name (used for the per-share indicators).
+    name ending in ``_`` matches every field starting with it; a bare name
+    matches the exact field name. ``_STATEMENT_PREFIXES`` now supplies exact
+    core-field names, so each period carries only the whitelisted accounts.
     """
     out: dict[str, Any] = {}
     for prefix in prefixes:

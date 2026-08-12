@@ -619,9 +619,14 @@ class FinancialStatementsTool(BaseTool):
         "Fetch a single stock's financial statements: balance sheet, income "
         "statement, cash-flow statement, or key per-period indicators (margins, "
         "ROE, EPS, etc.). Markets: A-share (.SH/.SZ/.BJ), US (.US) and "
-        "Hong Kong (.HK). US uses SEC EDGAR companyfacts; A-share and HK use "
-        "Eastmoney. Reports come back newest-first as flat per-period rows. Use "
-        'this to read fundamentals before building a valuation or screen. Example: '
+        "Hong Kong (.HK). US uses SEC EDGAR companyfacts; A-share prefers the "
+        "local Hikyuu store and falls back to Eastmoney; HK uses Eastmoney. "
+        "Reports come back newest-first as flat per-period rows. Note: for "
+        "A-shares served by the local Hikyuu store each period carries a curated "
+        "set of core accounts (e.g. revenue, net income, gross margin, ROE, "
+        "balance-sheet and cash-flow essentials) rather than every possible "
+        "account — that is intentional, not a truncated response. Use this to "
+        "read fundamentals before building a valuation or screen. Example: "
         '{"code": "600519.SH", "statement": "income", "period": "annual"}.'
     )
     parameters = {
