@@ -28,6 +28,7 @@ class TestCodeCurrency:
             ("005930.KS", "KRW"),
             ("TD.TO", "CAD"),
             ("PNG.V", "CAD"),
+            ("VIC.VN", "VND"),
             ("IF2406.CFFEX", "CNY"),
         ],
     )
@@ -72,6 +73,18 @@ class TestRejectMixedCurrency:
         with pytest.raises(ValueError, match="one settlement currency"):
             _reject_mixed_currency(["TD.TO", "AAPL.US"])
 
+    def test_vnd_is_named_rather_than_marked_unknown(self):
+        # A market with no entry in the table degrades to 'UNKNOWN:<market>',
+        # which still fails closed but names nothing useful in the error.
+        with pytest.raises(ValueError) as excinfo:
+            _reject_mixed_currency(["VIC.VN", "AAPL.US"])
+        message = str(excinfo.value)
+        assert "VND" in message
+        assert "UNKNOWN" not in message
+
+    def test_two_hose_symbols_are_one_currency(self):
+        _reject_mixed_currency(["VIC.VN", "FPT.VN"])
+
     def test_the_error_names_every_currency_and_its_codes(self):
         with pytest.raises(ValueError) as excinfo:
             _reject_mixed_currency(["600519.SH", "AAPL.US", "005930.KS"])
@@ -111,3 +124,23 @@ class TestRunBacktestFailsClosed:
         codes = ["IF2406.CFFEX", "ESZ4"]
         engine = CompositeEngine({"initial_cash": 1_000_000, "codes": codes}, codes)
         assert engine._rule_for("IF2406.CFFEX") is not engine._rule_for("ESZ4")
+
+
+class TestCompositeRunInterval:
+    """The run config, not the construction config, sets the funding bar span.
+
+    ``CryptoEngine`` re-reads ``interval`` in ``run_backtest`` (crypto.py:105);
+    the composite must follow the same convention or a run launched with a
+    different interval than the one it was constructed with settles funding at
+    the stale span (#1290).
+    """
+
+    def test_run_backtest_rereads_the_interval(self) -> None:
+        codes = ["BTC-USDT"]
+        engine = CompositeEngine({"initial_cash": 100_000, "interval": "1D"}, codes)
+        assert engine._run_interval == "1D"
+        try:
+            engine.run_backtest({"codes": codes, "interval": "4H"}, None, None, None)
+        except Exception:
+            pass  # the pipeline needs a real loader; only the re-read matters here
+        assert engine._run_interval == "4H"

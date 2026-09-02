@@ -93,7 +93,8 @@ class ResearchReportsTool(BaseTool):
                 "description": (
                     "Earliest report publish date (inclusive) to include, as "
                     "'YYYYMMDD' (e.g. '20240101'). Optional; defaults to the "
-                    "beginning of the trailing two-year window."
+                    "beginning of the trailing two-year window. Must not be "
+                    "later than 'endTime'."
                 ),
             },
             "endTime": {
@@ -145,6 +146,15 @@ class ResearchReportsTool(BaseTool):
             return _error(
                 "'beginTime'/'endTime' must be valid 'YYYYMMDD' strings"
                 + " (e.g. '20240101') when provided"
+            )
+        # A reversed window is answered by Eastmoney with HTTP 200 and zero hits,
+        # which this tool would then report as "no research coverage" — a false
+        # statement about the company rather than about the request.
+        if begin_time > end_time:
+            return _error(
+                f"'beginTime' ({begin_time:%Y%m%d}) must not be later than 'endTime' "
+                f"({end_time:%Y%m%d}); a reversed window returns zero reports and "
+                "would be indistinguishable from genuinely missing coverage"
             )
 
         try:
