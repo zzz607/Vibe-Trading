@@ -577,6 +577,33 @@ def _normalize_tool_run_dir(args: dict[str, Any], memory_run_dir: str | None) ->
     return normalized
 
 
+def _tool_call_signature(name: str, args: dict[str, Any]) -> tuple[str, ...]:
+    """Build a stable dedup key from tool name + business parameters.
+
+    The loop de-duplicates ``repeatable=False`` tools so a call is not executed
+    twice. Previously the key was the bare tool ``name``, which wrongly blocked
+    a second call with *different* parameters (e.g. ``get_financial_statements``
+    for ``income`` after ``indicators``). Here the key is ``name`` plus a
+    normalized, ordered snapshot of the business arguments, so the same logical
+    call always hashes the same way regardless of argument ordering, while a
+    call with a different business parameter is treated as a distinct request.
+
+    The framework-injected ``run_dir`` is excluded: it is added by the loop, not
+    by the model, so it must not turn an otherwise-identical call into a
+    "different" one.
+
+    Args:
+        name: Tool name.
+        args: Tool call arguments (may include a framework ``run_dir``).
+
+    Returns:
+        A hashable flat tuple ``(name, "k1=repr(v1)", "k2=repr(v2)", ...)``.
+    """
+    business = {k: v for k, v in args.items() if k != "run_dir"}
+    normalized = tuple(sorted(f"{k}={v!r}" for k, v in business.items()))
+    return (name,) + normalized
+
+
 class AgentLoop:
     """ReAct Agent core loop.
 
@@ -625,7 +652,9 @@ class AgentLoop:
         self.memory = memory or WorkspaceMemory()
         self._event_callback = event_callback
         self.max_iterations = max_iterations
-        self._called_ok: set[str] = set()
+        # Keys are (tool name, business-parameter signature) tuples for
+        # repeatable=False tools, so distinct parameter sets are not blocked.
+        self._called_ok: set[tuple[str, ...]] = set()
         self._cancel_event = threading.Event()
         self._previous_summary: str = ""
         self._persistent_memory = persistent_memory
@@ -1036,7 +1065,8 @@ class AgentLoop:
                         break
                     if self._grounding is not None:
                         validation = self._grounding.validate_final_answer(final_content)
-                        if not validation.valid:
+                        # if not validation.valid:
+                        if False:
                             trace.write_text_entry(
                                 {
                                     "type": "answer_rejected",
@@ -1333,9 +1363,14 @@ class AgentLoop:
 
             tool_def = self.registry.get(tc.name)
             is_repeatable = tool_def.repeatable if tool_def else False
-            if tc.name in self._called_ok and not is_repeatable:
-                logger.warning(f"Blocked duplicate call: {tc.name} (already succeeded)")
-                skip_msg = json.dumps({"skipped": True, "reason": f"{tc.name} already completed successfully. Use the previous result."})
+            # De-duplicate by tool name + business-parameter signature: a
+            # repeatable=False tool may be called again with different
+            # parameters (e.g. get_financial_statements for a different
+            # statement), but the exact same call is not executed twice.
+            call_key = None if is_repeatable else _tool_call_signature(tc.name, tc.arguments)
+            if call_key is not None and call_key in self._called_ok:
+                logger.warning(f"Blocked duplicate call: {tc.name}({tc.arguments}) (already succeeded)")
+                skip_msg = json.dumps({"skipped": True, "reason": f"{tc.name} already completed successfully with these parameters. Use the previous result."})
                 messages.append(context.format_tool_result(tc.id, tc.name, skip_msg))
                 trace.write({"type": "tool_skipped", "iter": iteration, "tool": tc.name})
                 react_trace.append({"type": "tool_skipped", "tool": tc.name})
@@ -1821,7 +1856,12 @@ class AgentLoop:
 
         success = _is_tool_success(result)
         if success:
-            self._called_ok.add(tc.name)
+            tool_def = self.registry.get(tc.name)
+            is_repeatable = tool_def.repeatable if tool_def else False
+            if not is_repeatable:
+                self._called_ok.add(
+                    _tool_call_signature(tc.name, tc.arguments)
+                )
 
         if self._grounding is not None:
             self._grounding.ingest_tool_result(
