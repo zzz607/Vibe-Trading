@@ -283,6 +283,14 @@ _MEMORY_SECTION = """
 
 """
 
+# Auto-recall injection budget (chars). The previous per-memory cap of 500
+# silently truncated long entries (e.g. a 10-section report template) part-way
+# through, so the model only ever saw the first sections. Per-memory now aligns
+# with RememberTool.recall (2000); the shared total keeps the per-message token
+# cost bounded when several long memories are recalled at once.
+_AUTO_RECALL_BODY_CHARS = 2000
+_AUTO_RECALL_TOTAL_CHARS = 4000
+
 
 class ContextBuilder:
     """Builds message context for AgentLoop.
@@ -401,7 +409,14 @@ class ContextBuilder:
             try:
                 recalls = self._persistent_memory.find_relevant(user_message, max_results=3)
                 if recalls:
-                    lines = [f"- **{r.title}** ({r.memory_type}): {r.body[:500]}" for r in recalls]
+                    budget = _AUTO_RECALL_TOTAL_CHARS
+                    lines = []
+                    for r in recalls:
+                        if budget <= 0:
+                            break
+                        body = r.body[: min(_AUTO_RECALL_BODY_CHARS, budget)]
+                        budget -= len(body)
+                        lines.append(f"- **{r.title}** ({r.memory_type}): {body}")
                     recall_block = "\n".join(lines)
                     enriched = (
                         f"<recalled-memories>\n{recall_block}\n</recalled-memories>\n\n"
