@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -20,6 +23,11 @@ _PROVIDERS_JSON = (
     Path(__file__).resolve().parents[1] / "src" / "providers" / "llm_providers.json"
 )
 _GO_URL = "https://opencode.ai/zen/go/v1"
+
+# ``x-opencode-session`` carries one 36-character UUID per conversation.
+_UUID36 = re.compile(
+    r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
+)
 
 
 def _completion_body(model: str) -> dict:
@@ -144,14 +152,28 @@ def test_session_binding_is_scoped_and_reset() -> None:
     assert current_llm_session_id() == ""
     token = bind_llm_session_id("  sess-1  ")
     try:
-        assert current_llm_session_id() == "sess-1"
+        bound = current_llm_session_id()
+        assert _UUID36.match(bound), bound
         inner = bind_llm_session_id(None)
         assert current_llm_session_id() == ""
         reset_llm_session_id(inner)
-        assert current_llm_session_id() == "sess-1"
+        assert current_llm_session_id() == bound
     finally:
         reset_llm_session_id(token)
     assert current_llm_session_id() == ""
+
+    # Deterministic: one Vibe session always maps to one UUID, and two
+    # sessions never share it.
+    token = bind_llm_session_id("sess-1")
+    try:
+        assert current_llm_session_id() == bound
+    finally:
+        reset_llm_session_id(token)
+    token = bind_llm_session_id("sess-2")
+    try:
+        assert current_llm_session_id() != bound
+    finally:
+        reset_llm_session_id(token)
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +210,7 @@ def test_bound_session_id_is_sent_to_opencode() -> None:
 
     token = bind_llm_session_id("vibe-session-42")
     try:
+        expected = current_llm_session_id()
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             llm = _adapter(client, provider="opencode", base_url=_GO_URL)
             assert llm.invoke("hello").content == "ok"
@@ -195,9 +218,10 @@ def test_bound_session_id_is_sent_to_opencode() -> None:
     finally:
         reset_llm_session_id(token)
 
+    assert _UUID36.match(expected), expected
     assert len(seen) == 2
     for headers in seen:
-        assert headers["x-opencode-session"] == "vibe-session-42"
+        assert headers["x-opencode-session"] == expected
         assert headers["user-agent"].startswith("Vibe-Trading/")
 
 
@@ -219,7 +243,7 @@ def test_unbound_requests_share_a_stable_fallback_id() -> None:
 
     assert seen[0] == seen[1]
     assert seen[2] != seen[0]
-    assert all(len(value) >= 16 for value in seen)
+    assert all(_UUID36.match(value) for value in seen), seen
 
 
 @pytestmark_wire
@@ -237,7 +261,7 @@ def test_deepseek_label_pointed_at_opencode_still_gets_header() -> None:
     finally:
         reset_llm_session_id(token)
 
-    assert seen[0]["x-opencode-session"] == "legacy-config"
+    assert _UUID36.match(seen[0]["x-opencode-session"])
 
 
 @pytestmark_wire
@@ -277,3 +301,61 @@ def test_explicit_extra_header_wins_over_injected_session() -> None:
         reset_llm_session_id(token)
 
     assert seen[0]["x-opencode-session"] == "caller-wins"
+
+
+# ---------------------------------------------------------------------------
+# User-Agent override (VIBE_TRADING_USER_AGENT)
+# ---------------------------------------------------------------------------
+
+
+def _build_with_env(env: dict[str, str]) -> dict:
+    import src.providers.llm as llm_mod
+
+    captured: dict = {}
+
+    class _FakeChatOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    llm_mod._dotenv_loaded = True
+    with patch.dict(os.environ, env, clear=True):
+        with patch.object(llm_mod, "ChatOpenAIWithReasoning", _FakeChatOpenAI):
+            llm_mod._recent_caps = None
+            llm_mod.build_llm()
+    return captured
+
+
+def test_user_agent_env_override_reaches_every_provider() -> None:
+    model = {"LANGCHAIN_MODEL_NAME": "deepseek-v4.1-flash", "VIBE_TRADING_USER_AGENT": "my-coding-agent/1.0"}
+    canonical = _build_with_env(
+        {
+            **model,
+            "LANGCHAIN_PROVIDER": "opencode",
+            "OPENCODE_API_KEY": "sk-test",
+            "OPENCODE_BASE_URL": _GO_URL,
+        }
+    )
+    legacy = _build_with_env(
+        {
+            **model,
+            "LANGCHAIN_PROVIDER": "opencode-go",
+            "OPENAI_API_KEY": "sk-test",
+            "OPENAI_BASE_URL": _GO_URL,
+        }
+    )
+
+    assert canonical["default_headers"]["User-Agent"] == "my-coding-agent/1.0"
+    assert legacy["default_headers"]["User-Agent"] == "my-coding-agent/1.0"
+
+
+def test_user_agent_defaults_to_vibe_trading_when_unset() -> None:
+    captured = _build_with_env(
+        {
+            "LANGCHAIN_PROVIDER": "opencode",
+            "OPENCODE_API_KEY": "sk-test",
+            "OPENCODE_BASE_URL": _GO_URL,
+            "LANGCHAIN_MODEL_NAME": "deepseek-v4.1-flash",
+        }
+    )
+
+    assert captured["default_headers"]["User-Agent"].startswith("Vibe-Trading/")

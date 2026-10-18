@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from itertools import count
 from types import SimpleNamespace
 
@@ -354,4 +355,9 @@ def test_auto_compact_summary_call_sees_the_bound_llm_session(harness, monkeypat
         reset_llm_session_id(token)
 
     assert seen, "the compaction made no summary call"
-    assert seen == ["vibe-session-42"] * len(seen)
+    # The live value is the 36-character UUID derived from the Vibe session id;
+    # what matters here is that the thread saw the same bound id on every call.
+    assert len(set(seen)) == 1
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", seen[0]
+    ), seen[0]

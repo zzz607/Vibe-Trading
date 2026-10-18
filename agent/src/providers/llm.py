@@ -317,8 +317,9 @@ if ChatOpenAI is not None:
             self._vibe_owned_http_clients = tuple(vibe_owned_http_clients or ())
             # One id per adapter: outside a bound Vibe session (swarm workers,
             # scheduled research, CLI) every request from this adapter still
-            # shares a stable conversation identity.
-            self._vibe_fallback_session_id = uuid.uuid4().hex
+            # shares a stable conversation identity. A full 36-character UUID,
+            # not ``uuid4().hex``: OpenCode Go expects that shape.
+            self._vibe_fallback_session_id = str(uuid.uuid4())
             # Every ambient spelling is omitted per request, and an explicit
             # header sharing its name in another case is put back after the
             # omits (see _provider_scoped_extra_headers). Excluding the twin
@@ -1768,9 +1769,13 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
     langchain_max_tokens = get_env_config().llm.langchain_max_tokens
     if langchain_max_tokens:
         kwargs["max_tokens"] = langchain_max_tokens
-    if caps.default_headers:
+    global_user_agent = get_env_config().llm.vibe_user_agent.strip()
+    if caps.default_headers or global_user_agent:
         headers = dict(caps.default_headers)
+        if global_user_agent:
+            headers["User-Agent"] = global_user_agent
         if caps.name in {"moonshot", "kimi-coding"}:
+            # Provider-scoped setting wins over the global client identity.
             custom_ua = get_env_config().llm.moonshot_user_agent.strip()
             if custom_ua:
                 headers["User-Agent"] = custom_ua
