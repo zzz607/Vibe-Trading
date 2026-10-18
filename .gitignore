@@ -127,6 +127,10 @@ docs/
 !wiki/docs/**
 docs/screenshots/agent-run.png
 docs/screenshots/boot.png
+# agent/docs holds the agent's own reference docs (team presets, skill index);
+# tracked on purpose, unlike the top-level internal docs above.
+!agent/docs/
+!agent/docs/**
 data/minutes/
 data/overnight*.log
 data/*.log
