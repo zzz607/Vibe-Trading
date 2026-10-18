@@ -3,11 +3,12 @@
 Pulls a single stock's balance sheet, income statement, cash-flow statement, or
 key per-period indicators from a market-appropriate public source:
 
-* **A-share** (``.SH`` / ``.SZ`` / ``.BJ``) — Eastmoney's A-share F10 report
-  datasets (``RPT_F10_FINANCE_*``), filtered on the dotted ``SECUCODE`` (e.g.
-  ``600519.SH``). The legacy Sina ``quotes.sina.cn`` company-finance openapi
-  returned a graceful-empty masking an upstream failure, so the A-share path now
-  shares the Eastmoney transport with HK.
+* **A-share** (``.SH`` / ``.SZ`` / ``.BJ``) — the local ashare Parquet store
+  (``history_finance``, the hikyuu history-finance table) when
+  ``VIBE_ASHARE_DATA_DIR`` is present and holds the code, else Eastmoney's
+  A-share F10 report datasets (``RPT_F10_FINANCE_*``) filtered on the dotted
+  ``SECUCODE`` (e.g. ``600519.SH``). The local path returns a curated core-account
+  subset per statement, not the full F10 field set.
 * **US** (``.US``) — SEC EDGAR companyfacts XBRL, resolved by ticker->CIK.
 * **Hong Kong** (``.HK``) — Eastmoney's HK F10 financial-report datasets,
   filtered on the bare ``SECURITY_CODE``; ``indicators`` reads the
@@ -245,6 +246,40 @@ def _filter_by_period(
         if str(row.get("REPORT_DATE", ""))[:10].endswith("-12-31")
     ]
     return annual or periods
+
+
+def _fetch_ashare_statement(
+    code: str, *, statement: str, period: str
+) -> dict[str, Any]:
+    """Fetch one A-share statement from the local ashare Parquet store.
+
+    ashare mirrors hikyuu's history-finance table, so each statement resolves to
+    a curated core-account subset rather than Eastmoney's full F10 field set.
+    Returns an ``error`` dict when the local directory is absent or has nothing
+    for ``code``; the caller then falls back to Eastmoney.
+
+    Args:
+        code: A-share symbol (e.g. ``"600519.SH"``).
+        statement: One of :data:`_VALID_STATEMENTS`.
+        period: ``"annual"`` or ``"quarter"``.
+
+    Returns:
+        ``{"periods": [...]}`` on success, ``{"error": ...}`` otherwise.
+    """
+    try:
+        from backtest.loaders.ashare_financial import AshareFinancial, is_available
+    except Exception as exc:  # noqa: BLE001 - optional local source
+        return {"error": f"ashare financial accessor unavailable: {exc}"}
+    if not is_available():
+        return {"error": "ashare data directory not present"}
+    try:
+        rows = AshareFinancial().fetch(code, statement=statement, period=period)
+    except Exception as exc:  # noqa: BLE001 - local miss must not kill the call
+        logger.warning("ashare statement fetch failed for %s: %s", code, exc)
+        return {"error": str(exc)}
+    if not rows:
+        return {"error": f"no local ashare {statement} rows for {code}"}
+    return {"periods": rows}
 
 
 def _fetch_eastmoney_statement(
@@ -868,6 +903,17 @@ class FinancialStatementsTool(BaseTool):
             else:
                 result = _fetch_yahoo_statement(code, statement=statement, period=period)
                 source = "yahoo"
+        elif market == "a":
+            # Local ashare Parquet store first (offline, no auth); Eastmoney's F10
+            # datasets when the directory is absent or carries no rows for the code.
+            local = _fetch_ashare_statement(code, statement=statement, period=period)
+            if "error" in local:
+                result = _fetch_eastmoney_statement(
+                    code, statement=statement, period=period
+                )
+                source = "eastmoney"
+            else:
+                result, source = local, "ashare"
         else:
             result = _fetch_eastmoney_statement(
                 code, statement=statement, period=period

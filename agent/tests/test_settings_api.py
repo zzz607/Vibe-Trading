@@ -701,7 +701,7 @@ def test_get_data_source_settings_lists_default_source_orders(
     assert a_share["override"] is None
     assert a_share["override_invalid"] is False
     assert a_share["effective_order"] == a_share["default_order"]
-    assert a_share["default_order"][0] == "tencent"
+    assert a_share["default_order"][0] == "ashare"
     uk_equity = orders["uk_equity"]
     assert uk_equity["env_var"] == "MARKET_DATA_ORDER_UK_EQUITY"
     assert uk_equity["default_order"][0] == "yahoo"
@@ -722,7 +722,7 @@ def test_update_source_orders_persists_and_hot_applies(
                     "market": "a_share",
                     "order": [
                         "tushare", "tencent", "eastmoney",
-                        "baostock", "akshare", "gildata", "local",
+                        "baostock", "akshare", "gildata", "local", "ashare",
                     ],
                 },
             ],
@@ -761,7 +761,7 @@ def test_update_source_orders_reset_clears_override(
                     "market": "a_share",
                     "order": [
                         "tushare", "tencent", "eastmoney",
-                        "baostock", "akshare", "gildata", "local",
+                        "baostock", "akshare", "gildata", "local", "ashare",
                     ],
                 },
             ],

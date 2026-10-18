@@ -44,6 +44,9 @@ CANARY_SYMBOLS = {
 }
 EXCLUDED_PUBLIC_SOURCES = {
     "local": "operator files, not a public endpoint",
+    # Reads the local ashare Parquet directory (VIBE_ASHARE_DATA_DIR), synced by
+    # the ashare collector — no endpoint to probe.
+    "ashare": "local ashare Parquet directory, not a public endpoint",
     # Reads the local SQLite store that `python -m src.br_data sync` fills
     # from B3's COTAHIST files; it never calls a network endpoint itself.
     "b3_cotahist": "local br-data store, synced separately",

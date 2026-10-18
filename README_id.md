@@ -636,10 +636,11 @@ the wall-clock activity watchdog.
 
 ## 📡 Sumber Data & Smart Fallback
 
-Satu call `get_market_data`, **29 sumber data market**, salah satunya marketplace premium opsional **QVeris**. Atur `source: "auto"` — loader memilih berdasarkan simbol lalu mengikuti chain per market yang diurutkan berdasarkan **risiko IP-ban**: sumber publik yang tidak pernah diblokir lebih dulu, sumber throttled / membutuhkan key belakangan. Zero-config, tanpa single point of failure.
+Satu call `get_market_data`, **30 sumber data market**, salah satunya marketplace premium opsional **QVeris**. Atur `source: "auto"` — loader memilih berdasarkan simbol lalu mengikuti chain per market yang diurutkan berdasarkan **risiko IP-ban**: sumber publik yang tidak pernah diblokir lebih dulu, sumber throttled / membutuhkan key belakangan. Zero-config, tanpa single point of failure.
 
 | Sumber | Market | Auth | Peran |
 |--------|---------|------|------|
+| `ashare` | A-shares (local Parquet) | none | offline, forward-adjusted daily |
 | `tencent` | A-share + HK | tidak ada | tidak terkena IP-ban |
 | `mootdx` | A-share (hanya pemilihan eksplisit) | tidak ada | dihapus dari rantai bawaan pada Oktober 2026: server TDX berhenti merespons protokol klien (#1729) |
 | `eastmoney` | A / AS / HK | tidak ada | OHLCV + fundamental mendalam & tool flow (throttled) |
@@ -664,7 +665,7 @@ Satu call `get_market_data`, **29 sumber data market**, salah satunya marketplac
 
 **Fallback chain (berdasarkan risiko IP-ban):**
 
-- **A-share** → `tencent` · `eastmoney` · `baostock` · `akshare` · `tushare` · `gildata` · `local`
+- **A-share** → `ashare` · `tencent` · `eastmoney` · `baostock` · `akshare` · `tushare` · `gildata` · `local`
 - **US** → `yahoo` · `stooq` · `sina` · `eastmoney` · `yfinance` · `tiingo` · `fmp` · `finnhub` · `alphavantage` · `longbridge` · `akshare` · `local`
 - **HK** → `tencent` · `eastmoney` · `yahoo` · `futu` · `akshare` · `yfinance` · `tushare` · `longbridge` · `gildata` · `local`
 - **India (NSE/BSE)** → `yahoo` · `yfinance` · `india_broker` · `local`
@@ -2094,7 +2095,7 @@ Vibe-Trading/
 │   │
 │   └── backtest/                   # Backtest engines
 │       ├── engines/                #   10 engines + composite cross-market engine + options_portfolio
-│       ├── loaders/                #   29 sources: tushare, okx, nobitex, wallex, binance, yfinance, akshare, baostock, tencent, mootdx, ccxt, futu, pykrx, local, eastmoney, sina, stooq, yahoo, finnhub, alphavantage, tiingo, fmp, longbridge, mt5, qveris, india_broker, tickerall, gildata, b3_cotahist
+│       ├── loaders/                #   30 sources: tushare, okx, nobitex, wallex, binance, yfinance, akshare, baostock, ashare, tencent, mootdx, ccxt, futu, pykrx, local, eastmoney, sina, stooq, yahoo, finnhub, alphavantage, tiingo, fmp, longbridge, mt5, qveris, india_broker, tickerall, gildata, b3_cotahist
 │       │   ├── base.py             #   DataLoader Protocol
 │       │   └── registry.py         #   Registry + auto-fallback chains
 │       └── optimizers/             #   MVO, equal vol, max div, risk parity

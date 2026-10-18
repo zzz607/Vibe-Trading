@@ -253,6 +253,11 @@ class DataConfig(_EnvBase):
     # into one SQLite file. Empty = default
     # ``~/.vibe-trading/br-data/br_data.db``.
     vibe_br_data_db: str = Field(alias="VIBE_BR_DATA_DB", default="")
+    # A-share local data directory written by ashare (hive-partitioned Parquet:
+    # kline_day/, index_day/, xdxr/, history_finance/). Read by
+    # backtest.loaders.ashare_loader, which serves forward-adjusted daily bars
+    # with no network call. Empty = default ``~/.vibe-trading/ashare/data``.
+    vibe_ashare_data_dir: str = Field(alias="VIBE_ASHARE_DATA_DIR", default="")
     # First COTAHIST year a sync downloads (B3 publishes from 1986).
     vibe_br_cotahist_start_year: int = Field(alias="VIBE_BR_COTAHIST_START_YEAR", default=2015)
     # First year of CVM fund daily reports / company filings a sync downloads.

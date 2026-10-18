@@ -17,10 +17,13 @@ DEFAULT_MAX_ROWS = 250
 # fallback chain (registry.FALLBACK_CHAINS), so an unavailable preferred source
 # still degrades gracefully to the rest of the chain. US equities route to the
 # throttle-tolerant Yahoo public endpoint first (lower IP-ban risk than the
-# yfinance SDK), A-shares and HK equities to the never-banned Tencent endpoint.
+# yfinance SDK), A-shares to the local ashare store (offline, no ban risk) and HK
+# equities to the never-banned Tencent endpoint.
 _SOURCE_PATTERNS = [
     (re.compile(r"^local:", re.I), "local"),
-    (re.compile(r"^\d{6}\.(SZ|SH|BJ)$", re.I), "tencent"),
+    # A-shares (stocks and indices): local ashare Parquet store first; no data
+    # directory -> unavailable -> tencent takes over through the a_share chain.
+    (re.compile(r"^\d{6}\.(SZ|SH|BJ)$", re.I), "ashare"),
     (re.compile(r"^[A-Z0-9&.\-]+\.US$", re.I), "yahoo"),
     (re.compile(r"^\d{3,5}\.HK$", re.I), "tencent"),
     # India: NSE (RELIANCE.NS) / BSE (500325.BO). Tickers may carry '&' and '-'

@@ -1,12 +1,17 @@
-"""Read-only tool: A-share shareholder count history via Eastmoney datacenter.
+"""Read-only tool: A-share shareholder count history.
 
-Eastmoney's datacenter report API publishes the "股东户数" (number of
-registered shareholders) disclosure for mainland A-shares. The history comes
-from the per-period detail report: one row per disclosure, each with the change
-against the previous disclosed period (the interval varies — quarterly reports,
-plus intra-quarter ad-hoc disclosures — and each row states its own
-``prev_period_end``). Average holding value per account exists only on the
-latest-only report, so it is joined onto the newest row when the two agree.
+The local ashare Parquet store is tried first: its ``history_finance`` dataset
+carries the per-report-period 股东户数 / 流通A股 / 总股本 accounts, from which the
+holder count, per-account holding and period-end market cap are derived offline.
+When ``VIBE_ASHARE_DATA_DIR`` is absent or has no disclosure for the code, the
+tool falls back to Eastmoney's datacenter report API.
+
+Eastmoney's datacenter publishes the same disclosure as a per-period detail
+report: one row per disclosure, each with the change against the previous
+disclosed period (the interval varies — quarterly reports, plus intra-quarter
+ad-hoc disclosures — and each row states its own ``prev_period_end``). Average
+holding value per account exists only on the latest-only report, so it is joined
+onto the newest row when the two agree.
 
 Only mainland A-shares (``.SH`` / ``.SZ`` / ``.BJ``) carry this disclosure;
 other markets return an error envelope.
@@ -15,10 +20,13 @@ other markets return an error envelope.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from backtest.loaders.eastmoney_client import datacenter_rejection, get_json, resolve_secid
 from src.agent.tools import BaseTool
+
+logger = logging.getLogger(__name__)
 
 # Eastmoney datacenter report endpoint + the two shareholder-number reports:
 # the per-period detail report (one row per disclosure, what max_periods pages
@@ -51,11 +59,11 @@ class ShareholderCountTool(BaseTool):
     name = "get_shareholder_count"
     description = (
         "Fetch mainland A-share shareholder count history (股东户数) from the "
-        "Eastmoney datacenter: holder count per disclosed period, the change "
-        "against the previous disclosed period (absolute and percent; the "
-        "interval varies and each row states its own prev_period_end), and "
-        "average holding (shares and market value) per account on the newest "
-        "row. Markets: China A-shares only (.SH / .SZ / .BJ). "
+        "local ashare data directory when configured (VIBE_ASHARE_DATA_DIR), "
+        "else from the Eastmoney datacenter: holder count per disclosed period, "
+        "the change against the previous disclosed period (absolute and "
+        "percent), and average holding (shares and market value) per account. "
+        "Markets: China A-shares only (.SH / .SZ / .BJ). "
         'Example: {"code": "600519.SH"}.'
     )
     parameters = {
@@ -107,6 +115,20 @@ class ShareholderCountTool(BaseTool):
             return _error(f"could not resolve A-share symbol '{code}'")
 
         limit = _clamp_periods(kwargs.get("max_periods", _MAX_PERIODS))
+
+        # Local ashare Parquet store first (offline, no auth); the Eastmoney
+        # datacenter below when the directory is absent or has no disclosure.
+        local = _fetch_ashare_periods(code, limit)
+        if local is not None:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "market": "CN",
+                    "source": "ashare",
+                    "data": {"code": code, "periods": local},
+                },
+                ensure_ascii=False,
+            )
 
         try:
             detail_payload = get_json(
@@ -163,6 +185,35 @@ class ShareholderCountTool(BaseTool):
             {"ok": True, "market": "CN", "source": "eastmoney", "data": data},
             ensure_ascii=False,
         )
+
+
+def _fetch_ashare_periods(code: str, limit: int) -> list[dict] | None:
+    """Read shareholder periods from the local ashare Parquet store.
+
+    Args:
+        code: Dotted A-share symbol (e.g. ``"600519.SH"``).
+        limit: Most-recent period count.
+
+    Returns:
+        Period dicts on success; ``None`` when the local source is absent,
+        unconfigured, or has no disclosure for ``code`` (the caller then falls
+        back to Eastmoney).
+    """
+    try:
+        from backtest.loaders.ashare_shareholder import (
+            AshareShareholder,
+            is_available,
+        )
+    except Exception as exc:  # noqa: BLE001 - optional local source
+        logger.debug("ashare shareholder accessor unavailable: %s", exc)
+        return None
+    if not is_available():
+        return None
+    try:
+        return AshareShareholder().fetch(code, max_periods=limit)
+    except Exception as exc:  # noqa: BLE001 - local miss must not kill the call
+        logger.warning("ashare shareholder fetch failed for %s: %s", code, exc)
+        return None
 
 
 def _clamp_periods(value: Any) -> int:

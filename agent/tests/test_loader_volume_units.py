@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from backtest.loaders.akshare_loader import DataLoader as AkshareLoader
+from backtest.loaders.ashare_loader import DataLoader as AshareLoader
 from backtest.loaders.baostock_loader import DataLoader as BaostockLoader
 from backtest.loaders.eastmoney_loader import DataLoader as EastmoneyLoader
 from backtest.loaders.local_loader import DataLoader as LocalLoader
@@ -35,6 +36,7 @@ from backtest.loaders.yfinance_loader import DataLoader as YfinanceLoader
         (MootdxLoader, "a_share", "lots"),
         (AkshareLoader, "a_share", "lots"),
         (TushareLoader, "a_share", "lots"),
+        (AshareLoader, "a_share", "lots"),
         (YahooLoader, "us_equity", "shares"),
         (YahooLoader, "hk_equity", "shares"),
         (YfinanceLoader, "us_equity", "shares"),

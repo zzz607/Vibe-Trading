@@ -34,9 +34,9 @@ from src.market_data import (
 @pytest.mark.parametrize(
     "code,expected",
     [
-        ("600519.SH", "tencent"),
-        ("000001.SZ", "tencent"),
-        ("430139.BJ", "tencent"),
+        ("600519.SH", "ashare"),
+        ("000001.SZ", "ashare"),
+        ("430139.BJ", "ashare"),
         ("AAPL.US", "yahoo"),
         ("700.HK", "tencent"),
         ("00700.HK", "tencent"),
@@ -638,7 +638,7 @@ def a_share_tushare_first():
     from backtest.loaders import registry
 
     os.environ["MARKET_DATA_ORDER_A_SHARE"] = (
-        "tushare,tencent,eastmoney,baostock,akshare,gildata,local"
+        "tushare,ashare,tencent,eastmoney,baostock,akshare,gildata,local"
     )
     registry.refresh_source_order_overrides()
     try:
@@ -669,7 +669,7 @@ def test_fetch_auto_respects_source_order_override_head(
         source="auto",
         loader_resolver=resolver,
     )
-    assert attempts[0] == "tushare"  # default head would be tencent
+    assert attempts[0] == "tushare"  # default head would be ashare
     assert "_unresolved" not in out
     assert "600519.SH" in out
 
@@ -746,7 +746,7 @@ def test_fetch_chain_provider_hook_wins_over_override(
         fallback_chain_provider=lambda src: ["eastmoney"],
     )
     # Detected source first, then the hook's chain — never the override order.
-    assert attempts[:2] == ["tencent", "eastmoney"]
+    assert attempts[:2] == ["ashare", "eastmoney"]
     assert "tushare" not in attempts
     assert "600519.SH" in out
 

@@ -34,6 +34,7 @@ _registration_lock = Lock()
 # Keep in sync with ``_loader_modules`` below — the regression test
 # ``test_valid_sources_covers_all_registered_loaders`` enforces full coverage.
 VALID_SOURCES: set[str] = {
+    "ashare",  # local ashare Parquet store (A-share daily, qfq at query time)
     "tushare",
     "okx",
     "nobitex",
@@ -97,6 +98,7 @@ def _ensure_registered() -> None:
             return
 
         _loader_modules = [
+            "backtest.loaders.ashare_loader",
             "backtest.loaders.tushare",
             "backtest.loaders.okx",
             "backtest.loaders.nobitex",
@@ -179,6 +181,10 @@ def is_no_network_fallback_source(source: str) -> bool:
 # REST fallbacks placed deeper in the chain.
 FALLBACK_CHAINS: dict[str, list[str]] = {
     "a_share": [
+        # Local ashare Parquet store: offline, no ban risk, forward-adjusted at
+        # query time. No data directory -> reports unavailable and the chain
+        # naturally degrades to tencent.
+        "ashare",
         "tencent",
         # mootdx retired from the default chain 2026-10-08: the TDX quote
         # servers stopped answering the client protocol mootdx/tdxpy speak
@@ -275,6 +281,7 @@ PRICE_CALIBER_BY_SOURCE: dict[str, str] = {
     "yahoo": "split_dividend",  # quote series split-adjusted at origin, scaled to adjclose
     "yfinance": "split_dividend",  # auto_adjust=True
     "eastmoney": "split_dividend",  # fqt=1 (forward-adjusted) on every kline call
+    "ashare": "split_dividend",  # xdxr events folded into a multiplicative ratio at query time
     # Tencent's qfq subtracts cash dividends from the price level instead of
     # scaling by a ratio: between corporate actions qfq = raw + c, and c steps by
     # the dividend at each ex-date (#1493, measured on 600519.SH where five

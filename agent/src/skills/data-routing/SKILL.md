@@ -27,6 +27,7 @@ per-source skill.
 | wallex | Crypto, TMN/Toman-quoted pairs (USDT-TMN, BTC-TMN — Iran market premium) | No | Needs api.wallex.ir access | data-routing (explicit `*TMN` routing only; truly serves 1m/1h/1d) |
 | ccxt | Crypto (100+ exchanges) | No | Needs exchange access | ccxt |
 | baostock | A-shares (free daily/min) | No | China network | data-routing |
+| ashare | A-shares (stocks + indices, daily, 前复权) | No | Offline (local Parquet dir at `VIBE_ASHARE_DATA_DIR`) | data-routing |
 | tencent | A-shares, HK, US (never-banned) | No | Unrestricted | data-routing |
 | mootdx | A-shares (retired 2026-10: TDX servers stopped answering the client protocol; explicit `source="mootdx"` only) | No | China network | data-routing |
 | futu | A/HK/US via OpenD gateway | Yes (OpenD running) | Local gateway | data-routing (runner-internal) |
@@ -77,8 +78,12 @@ is required only where listed (no key listed = free / no auth).
 
 Notes:
 - `get_financial_statements` reads US statements from SEC EDGAR companyfacts
-  (ticker -> CIK -> XBRL concepts) and A-share/HK statements from the Eastmoney
-  datacenter report API (per-market F10 report names).
+  (ticker -> CIK -> XBRL concepts), A-share statements from the local ashare
+  `history_finance` dataset when `VIBE_ASHARE_DATA_DIR` holds the code (curated
+  core accounts), else from the Eastmoney datacenter report API, and HK
+  statements from the Eastmoney datacenter (per-market F10 report names).
+- `get_shareholder_count` likewise reads the local ashare store first
+  (`history_finance` 股东户数 / 流通A股 / 总股本), falling back to Eastmoney.
 - `get_stock_news` routes A-share (SH/SZ/BJ) to an Eastmoney news client and
   US (.US) / HK (.HK) to a Yahoo search client; a failure on one upstream is
   returned as an error envelope, never raised, so a single bad symbol never
@@ -100,7 +105,9 @@ same-market sources automatically. Only set a concrete source when the user asks
 
 ### Source priority (for OHLCV by market)
 
-- **A-shares**: tencent (never banned) > tushare (`TUSHARE_TOKEN`) >
+- **A-shares**: ashare (local Parquet directory at `VIBE_ASHARE_DATA_DIR`; offline,
+  前复权 daily stocks + indices, freshness = the collector's latest completed day,
+  usually T-1) > tencent (never banned) > tushare (`TUSHARE_TOKEN`) >
   baostock / akshare > eastmoney (throttled).
 - **US stocks**: stooq / yahoo > tiingo / finnhub / fmp / alphavantage (key-gated) >
   sina / eastmoney (throttled) > yfinance.
