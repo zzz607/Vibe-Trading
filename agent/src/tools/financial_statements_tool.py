@@ -903,9 +903,11 @@ class FinancialStatementsTool(BaseTool):
             else:
                 result = _fetch_yahoo_statement(code, statement=statement, period=period)
                 source = "yahoo"
-        elif market == "a":
+        elif market == "a_share":
             # Local ashare Parquet store first (offline, no auth); Eastmoney's F10
             # datasets when the directory is absent or carries no rows for the code.
+            # The label must stay "a_share" — that is what _classify_market
+            # returns, and the trailing `else` silently swallows a mismatch.
             local = _fetch_ashare_statement(code, statement=statement, period=period)
             if "error" in local:
                 result = _fetch_eastmoney_statement(

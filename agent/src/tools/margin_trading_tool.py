@@ -125,6 +125,54 @@ def _err(message: str) -> str:
     return json.dumps({"ok": False, "error": message}, ensure_ascii=False)
 
 
+def _fetch_f10_margin(code: str, days: int) -> str | None:
+    """Read margin-financing balances from the local ashare F10 store.
+
+    Args:
+        code: Six-digit A-share code (no suffix).
+        days: Most-recent trading-day count cap.
+
+    Returns:
+        A JSON envelope with ``source="ashare_f10"``, or ``None`` when the store
+        is absent/stale or carries no rows for ``code``.
+
+    Note:
+        F10 states no ``financing_repay`` column (only the newest day names it
+        in prose, surfaced as ``latest_financing_repay``) and its
+        融券卖出量 is the day's *sold* volume, not Eastmoney's ``RQYL``
+        (outstanding). Those two fields are therefore omitted rather than
+        back-filled with a same-named value that would mean something else.
+    """
+    try:
+        from backtest.loaders.ashare_f10 import AshareF10, is_available
+    except Exception as exc:  # noqa: BLE001 - optional local source
+        logger.warning("ashare f10 accessor unavailable: %s", exc)
+        return None
+    if not is_available():
+        return None
+    try:
+        payload = AshareF10().margin(code, days=days)
+    except Exception as exc:  # noqa: BLE001 - a local miss must not sink the call
+        logger.warning("ashare f10 margin fetch failed for %s: %s", code, exc)
+        return None
+    if payload is None:
+        return None
+    return json.dumps(
+        {
+            "ok": True,
+            "market": "a_share",
+            "source": "ashare_f10",
+            "data": {
+                "code": code,
+                "margin_ratio": payload["margin_ratio"],
+                "latest_financing_repay": payload["latest_financing_repay"],
+                "rows": payload["rows"],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
 class MarginTradingTool(BaseTool):
     """Fetch daily A-share margin-financing / short-selling balances."""
 
@@ -179,6 +227,12 @@ class MarginTradingTool(BaseTool):
                 "(e.g. 600519.SH or 000001.SZ)."
             )
         days = _clamp_days(kwargs.get("days", _DEFAULT_DAYS))
+
+        # Local F10 first (offline, no per-host throttle); Eastmoney when the
+        # snapshot is absent or older than the freshness window.
+        local = _fetch_f10_margin(code, days)
+        if local is not None:
+            return local
 
         try:
             payload = eastmoney_client.get_json(

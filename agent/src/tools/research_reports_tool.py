@@ -55,6 +55,52 @@ _DEFAULT_LIMIT = 20
 _MAX_LIMIT = 50
 
 
+def _fetch_f10_research(code: str, limit: int) -> dict[str, Any] | None:
+    """Read sell-side research from the local ashare F10 store.
+
+    Args:
+        code: A-share symbol (e.g. ``"600685.SH"``).
+        limit: Cap on the per-broker detail rows.
+
+    Returns:
+        An envelope with ``source="ashare_f10"``, or ``None`` when the store is
+        absent, stale, or carries nothing for ``code`` — the caller then falls
+        through to Eastmoney + THS.
+
+    Note:
+        The local rows carry ``target_price`` and ``rating_change`` that the
+        Eastmoney path never returns, but no article ``title``: F10 lists the
+        forecast, not the headline. Fields are not renamed to fake parity.
+    """
+    try:
+        from backtest.loaders.ashare_f10 import AshareF10, is_available
+    except Exception as exc:  # noqa: BLE001 - optional local source
+        logger.warning("ashare f10 accessor unavailable: %s", exc)
+        return None
+    if not is_available():
+        return None
+    try:
+        payload = AshareF10().research(code, limit=limit)
+    except Exception as exc:  # noqa: BLE001 - a local miss must not sink the call
+        logger.warning("ashare f10 research fetch failed for %s: %s", code, exc)
+        return None
+    if payload is None:
+        return None
+    return {
+        "ok": True,
+        "market": "CN",
+        "source": "ashare_f10",
+        "data": {
+            "code": code,
+            "latest_rating_date": payload["latest_rating_date"],
+            "ratings": payload["ratings"],
+            "reports": payload["details"],
+            "consensus_eps": payload["consensus_eps"],
+            "forecast": payload["forecast"],
+        },
+    }
+
+
 class ResearchReportsTool(BaseTool):
     """Fetch A-share sell-side research reports plus market consensus EPS."""
 
@@ -156,6 +202,13 @@ class ResearchReportsTool(BaseTool):
                 f"({end_time:%Y%m%d}); a reversed window returns zero reports and "
                 "would be indistinguishable from genuinely missing coverage"
             )
+
+        # Local F10 first: it is offline and covers brokers Eastmoney's
+        # reportapi has dropped — 600685 carries 2026-09 ratings in F10 while
+        # the live list ends in 2024. Falls through when absent or stale.
+        local = _fetch_f10_research(code, limit)
+        if local is not None:
+            return json.dumps(local, ensure_ascii=False)
 
         try:
             # Eastmoney's reportapi expects the bare numeric ``code`` together

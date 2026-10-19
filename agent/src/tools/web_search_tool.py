@@ -7,6 +7,13 @@ cloud / shared IPs (issue #231: ``web_search`` showed ❌ while the run still
 succeeded via ``read_url``), so we pass an explicit ordered backend list and let
 ddgs fall through a throttled engine to the next one, with a short retry/backoff
 on top for transient failures.
+
+`VIBE_TRADING_SEARCH_PROXY` optionally routes ddgs through an HTTP/SOCKS proxy
+(`http://host:port` / `socks5h://host:port`); empty means no proxy. Worth setting
+when the engines are unreachable directly — e.g. a WSL guest whose host runs the
+proxy, which must be addressed by the host gateway rather than 127.0.0.1. It is
+handed to `DDGS(proxy=...)` because ddgs sits on primp (curl_cffi), which ignores
+`http_proxy` / `https_proxy` in the environment.
 """
 
 from __future__ import annotations
@@ -247,9 +254,14 @@ class WebSearchTool(BaseTool):
             supports_backend = False
 
         last_error: Exception | None = None
+        # ddgs builds its client on primp (curl_cffi), which — unlike requests /
+        # httpx — does NOT read http_proxy/https_proxy from the environment. The
+        # proxy has to be handed over explicitly or every engine dials out
+        # directly and stalls until timeout. Empty config keeps the old behaviour.
+        proxy = get_env_config().agent_tuning.vibe_trading_search_proxy.strip()
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             try:
-                with DDGS() as client:
+                with DDGS(proxy=proxy or None) as client:
                     if supports_backend:
                         raw = list(client.text(query, max_results=max_results, backend=backends))
                     else:

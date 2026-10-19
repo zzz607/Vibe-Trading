@@ -32,6 +32,7 @@ from typing import Any
 from backtest.loaders import eastmoney_client, yahoo_client
 
 from src.agent.tools import BaseTool
+from src.config.limits import TOOL_RESULT_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,58 @@ def _fetch_yahoo_news(query: str, limit: int) -> list[dict[str, Any]]:
     ][:limit]
 
 
+#: Headroom kept below the runtime's truncation cap. F10 excerpts run to 400
+#: characters, so 30 of them render past the cap — and truncation happens on the
+#: serialized string, which cuts the JSON mid-token and leaves the model with an
+#: unparseable result. Staying under the budget keeps every envelope valid.
+_ARTICLE_BUDGET = TOOL_RESULT_LIMIT - 800
+
+
+def _fit_articles(articles: list[dict[str, Any]], code: str) -> list[dict[str, Any]]:
+    """Drop trailing (oldest) articles until the envelope fits the char budget.
+
+    Measures the real rendering rather than estimating, because JSON escaping of
+    quotes and newlines inside an excerpt inflates the length unpredictably.
+    """
+    while len(articles) > 1:
+        rendered = json.dumps(
+            {
+                "ok": True,
+                "market": "a_share",
+                "source": "ashare_f10",
+                "data": {"scope": "stock", "code": code, "articles": articles},
+            },
+            ensure_ascii=False,
+        )
+        if len(rendered) <= _ARTICLE_BUDGET:
+            break
+        articles.pop()
+    return articles
+
+
+def _fetch_f10_news(code: str, limit: int) -> list[dict[str, Any]]:
+    """Read company announcements and press coverage from the local F10 store.
+
+    Returns an empty list — never an error — when the store is absent or stale,
+    so the caller silently falls through to Eastmoney. Each row carries ``kind``
+    (``"announcement"`` or ``"media"``); media rows also carry the article body
+    excerpt and its URL, neither of which the Eastmoney headline path returns.
+    """
+    try:
+        from backtest.loaders.ashare_f10 import AshareF10, is_available
+    except Exception as exc:  # noqa: BLE001 - optional local source
+        logger.warning("ashare f10 accessor unavailable: %s", exc)
+        return []
+    if not is_available():
+        return []
+    try:
+        articles = AshareF10().news(code, limit=limit) or []
+    except Exception as exc:  # noqa: BLE001 - a local miss must not sink the call
+        logger.warning("ashare f10 news fetch failed for %s: %s", code, exc)
+        return []
+    return _fit_articles(articles, code)
+
+
 class StockNewsTool(BaseTool):
     """Read-only per-stock and global financial news headlines."""
 
@@ -365,7 +418,14 @@ class StockNewsTool(BaseTool):
         )
 
     def _stock_via_eastmoney(self, code: str, query: str, limit: int) -> str:
-        """Fetch A-share headlines from Eastmoney for one code."""
+        """Fetch A-share headlines: local F10 first, then Eastmoney."""
+        local = _fetch_f10_news(code, limit)
+        if local:
+            return self._ok(
+                "a_share",
+                "ashare_f10",
+                {"scope": "stock", "code": code, "articles": local},
+            )
         try:
             articles = _fetch_eastmoney_news(query, limit)
         except Exception as exc:  # noqa: BLE001 - surface any fetch failure as envelope

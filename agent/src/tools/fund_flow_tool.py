@@ -85,6 +85,52 @@ def _parse_flow_row(raw: str) -> dict[str, Any] | None:
     return row
 
 
+def _fetch_f10_flow(codes: list[str], *, days: int) -> str | None:
+    """Read the daily capital-flow series for every symbol from local F10.
+
+    All-or-nothing: if any symbol is missing from the store this returns
+    ``None`` so the live path serves the whole envelope, rather than mixing
+    local and remote rows under a single ``source`` label.
+
+    Note:
+        F10 splits flow into four groups (主力净额 / 超大单净买入 / 大单净买入 /
+        主买净额) while Eastmoney reports five buckets. There is no
+        ``small``/``medium`` breakdown locally, so the keys are named after what
+        F10 actually measures and the missing buckets are not fabricated.
+    """
+    try:
+        from backtest.loaders.ashare_f10 import AshareF10, is_available
+    except Exception as exc:  # noqa: BLE001 - optional local source
+        logger.warning("ashare f10 accessor unavailable: %s", exc)
+        return None
+    if not is_available():
+        return None
+
+    accessor = AshareF10()
+    data: dict[str, Any] = {}
+    for symbol in (c.strip() for c in codes):
+        try:
+            rows = accessor.fund_flow(symbol, days=days)
+        except Exception as exc:  # noqa: BLE001 - a local miss must not sink the call
+            logger.warning("ashare f10 fund_flow failed for %s: %s", symbol, exc)
+            return None
+        if not rows:
+            return None
+        data[symbol] = {"symbol": symbol, "source": "ashare_f10", "rows": rows}
+
+    return json.dumps(
+        {
+            "ok": True,
+            "market": "stock",
+            "source": "ashare_f10",
+            "period": "daily",
+            "buckets": ["main_net", "super_large_net", "large_net", "active_buy_net"],
+            "data": data,
+        },
+        ensure_ascii=False,
+    )
+
+
 def _fetch_symbol_flow(symbol: str, *, period: str, days: int) -> dict[str, Any]:
     """Fetch one symbol's capital-flow series and shape it into a result dict.
 
@@ -234,6 +280,13 @@ class FundFlowTool(BaseTool):
         if not isinstance(days, int) or isinstance(days, bool) or days < 1:
             return _error("days must be a positive integer")
         days = min(days, _MAX_DAYS)
+
+        # Local F10 covers the daily series only (no intraday), so "min" always
+        # goes to the live provider.
+        if period == "daily":
+            local = _fetch_f10_flow(codes, days=days)
+            if local is not None:
+                return local
 
         results = {
             symbol: _fetch_symbol_flow(symbol, period=period, days=days)
