@@ -10,8 +10,8 @@ facts are structural rather than advisory:
   ever passed in or returned.
 
 Those are the mechanically decidable parts of the agent's output principles.
-The rest of that contract — "state the as-of", "analysis, not advice", "refuse
-out loud" — stays in the system prompt on purpose.
+The rest of that contract — "state the as-of", "refuse out loud" — stays in the
+system prompt on purpose.
 
 What a number IS — an observed print, a derived level, a proposal, a citation,
 a count — is declared by the model in a ``figures`` block and verified against

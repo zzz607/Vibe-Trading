@@ -58,7 +58,7 @@ class TestOutputPrinciplesArePresent:
     def test_the_section_exists(self) -> None:
         assert "## Output Principles" in _SYSTEM_PROMPT
         assert "## Output Principles" in _rendered_prompt()
-        assert "These six principles define" in _rendered_prompt()
+        assert "These five principles define" in _rendered_prompt()
 
     def test_principle_one_requires_a_tool_behind_every_number(self) -> None:
         prompt = _rendered_prompt()
@@ -81,29 +81,23 @@ class TestOutputPrinciplesArePresent:
         assert "never invent a ticker" in prompt
         assert "never let recalled memory overwrite a value a tool" in prompt
 
-    def test_principle_four_is_analysis_not_advice(self) -> None:
-        prompt = _rendered_prompt()
-
-        assert "Analysis, not advice." in prompt
-        assert "Do not tell the user what to buy, sell, or hold" in prompt
-
-    def test_principle_five_stops_when_enough_evidence(self) -> None:
+    def test_principle_four_stops_when_enough_evidence(self) -> None:
         prompt = _rendered_prompt()
 
         assert "Answer at the level of detail asked" in prompt
         assert "stop calling tools" in prompt
         assert "Do not re-fetch data you already have" in prompt
 
-    def test_principle_six_requires_an_audible_refusal(self) -> None:
+    def test_principle_five_requires_an_audible_refusal(self) -> None:
         prompt = _rendered_prompt()
 
         assert "Refuse out loud, never silently." in prompt
-        assert "principles 1–5" in prompt
+        assert "principles 1–4" in prompt
         assert "name the principle it conflicts with" in prompt
 
     def test_all_principles_are_numbered_in_order(self) -> None:
         block = _rendered_prompt().split("## Output Principles", 1)[1].split("## Tools", 1)[0]
-        positions = [block.index(f"{n}. **") for n in range(1, 7)]
+        positions = [block.index(f"{n}. **") for n in range(1, 6)]
 
         assert positions == sorted(positions)
 
@@ -480,7 +474,7 @@ class TestTheGateDoesNotKillCorrectAnswers:
 
 
 class TestTheSemanticPrinciplesStayInThePrompt:
-    """Principles 2, 4, and 5 are deliberately not regex gates."""
+    """Principles 2 and 4 are deliberately not regex gates."""
 
     def test_a_price_without_an_as_of_is_not_mechanically_rejected(
         self, tmp_path: Path
@@ -505,7 +499,6 @@ class TestTheSemanticPrinciplesStayInThePrompt:
             "Every number points at a tool.",
             "Every data point carries its as-of.",
             "What the tools did not return, you do not supply.",
-            "Analysis, not advice.",
             "Refuse out loud, never silently.",
         ):
             assert principle in prompt
