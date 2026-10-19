@@ -103,6 +103,26 @@ same-market sources automatically. Only set a concrete source when the user asks
 3. Set any required env key before calling a key-gated tool; if it is missing,
    report the missing key rather than failing silently.
 
+### Multi-instrument runs (peer / comparison analysis)
+
+The grounding gate authorizes a data tool only against symbols locked **before the
+current assistant tool batch started** — a `search_symbol` result cannot authorize
+calls made in the same batch. For every instrument beyond the one the user named:
+
+1. Call `search_symbol` for one peer code/name **in its own assistant turn** and
+   wait for the result; it locks a second identity beside the primary one.
+2. Only in a **later batch** call the data tools (`get_market_data`,
+   `get_financial_statements`, …) with the exact locked symbols. Once every peer
+   is locked, several may share one data call.
+3. If the user already names the peers with exchange suffixes (e.g. `601872.SH`),
+   they are locked from the start — no `search_symbol` needed.
+
+Never mix `search_symbol` and data calls in one batch while a symbol is
+unresolved: the data call fails with `identity_mismatch` and never reaches any
+source. When reporting figures for more than one instrument, declare each figure
+with its own symbol in the figures block — a figure left symbol-less fails the
+grounding check (`no_symbol`).
+
 ### Source priority (for OHLCV by market)
 
 - **A-shares**: ashare (local Parquet directory at `VIBE_ASHARE_DATA_DIR`; offline,
