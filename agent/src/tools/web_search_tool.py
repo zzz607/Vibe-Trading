@@ -71,6 +71,70 @@ def _aliyun_iqs_search(query: str, max_results: int = 5) -> list[dict] | None:
     return out
 
 
+def _bocha_search(query: str, max_results: int = 5) -> list[dict] | None:
+    """Search via Bocha (api.bochaai.com) — official CN search API built for AI.
+
+    A real API, unlike the ddgs engines: Bearer auth, JSON in/out, and Chinese
+    retrieval quality well above scraping DuckDuckGo. The response mirrors the
+    Bing Search API shape (``data.webPages.value[]``), and ``summary`` holds a
+    longer excerpt than ``snippet`` when summary generation is on.
+
+    Args:
+        query: Search query.
+        max_results: Result cap; the API accepts up to 10 per call.
+
+    Returns:
+        ddgs-shaped dicts (title/href/body) so the caller treats every provider
+        uniformly, or ``None`` when ``BOCHA_API_KEY`` is unset. Transport and
+        auth failures raise, letting the caller fall through to the next
+        provider.
+    """
+    key = get_env_config().data.bocha_api_key.strip()
+    if not key:
+        return None
+    import json as _json
+    import urllib.request
+
+    body = _json.dumps(
+        {
+            "query": query,
+            "count": max(1, min(max_results, 10)),
+            "summary": True,
+            # No recency filter: financial questions need old filings as often
+            # as today's news, and the caller can re-query if it wants fresh.
+            "freshness": "noLimit",
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.bochaai.com/v1/web-search",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+    )
+    response = urllib.request.urlopen(request, timeout=10)
+    payload = _json.loads(response.read().decode("utf-8"))
+
+    # The API can answer 200 with a non-200 body code; treat that as a failure
+    # rather than silently returning an empty list.
+    code = str(payload.get("code", "")).strip()
+    if code and code != "200":
+        message = payload.get("message") or payload.get("msg") or "unknown error"
+        raise RuntimeError(f"bocha api error {code}: {message}")
+
+    pages = ((payload.get("data") or {}).get("webPages") or {}).get("value") or []
+    return [
+        {
+            "title": page.get("name", ""),
+            "href": page.get("url", ""),
+            # summary is the longer excerpt; snippet is the fallback.
+            "body": page.get("summary") or page.get("snippet") or "",
+        }
+        for page in pages[:max_results]
+    ]
+
+
 def _bing_cn_search(query: str, max_results: int = 5) -> list[dict]:
     """Scrape cn.bing.com organic results — no API key, works where ddgs engines are blocked.
 
@@ -212,29 +276,36 @@ class WebSearchTool(BaseTool):
                 )
         backends = (get_env_config().agent_tuning.vibe_trading_search_backends or _DEFAULT_BACKENDS).strip() or "auto"
 
-        # Fast path: Alibaba Cloud IQS if configured (official API, CN-direct,
-        # ~1s, structured + snippet, best quality). Skip ddgs entirely when IQS
-        # is available — ddgs engines are unreachable from typical CN egress.
-        if get_env_config().data.aliyun_iqs_api_key.strip():
+        # Fast path: official APIs first. Each provider returns None when it has
+        # no key configured, [] when it answered with nothing, and raises on
+        # transport/auth errors — all three cases fall through to the next
+        # provider, then to ddgs. Add a provider by appending to this tuple.
+        for provider_name, provider_fn in (
+            ("aliyun_iqs", _aliyun_iqs_search),
+            ("bocha", _bocha_search),
+        ):
             try:
-                raw = _aliyun_iqs_search(query, max_results=max_results)
-                if raw:
-                    payload = {
-                        "status": "ok",
-                        "query": query,
-                        "backends": "aliyun_iqs",
-                        "results": [
-                            {"title": r.get("title", ""), "url": r.get("href", ""), "snippet": r.get("body", "")}
-                            for r in raw
-                        ],
-                    }
-                    payload = with_security_warnings(
-                        payload, fields=("results.*.title", "results.*.snippet")
-                    )
-                    return json.dumps(payload, ensure_ascii=False)
-                logger.warning("aliyun_iqs returned no results, falling through to ddgs")
+                raw = provider_fn(query, max_results=max_results)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("aliyun_iqs failed: %s, falling through to ddgs", exc)
+                logger.warning("%s failed: %s, falling through", provider_name, exc)
+                continue
+            if not raw:
+                if raw is not None:  # configured, answered, but nothing matched
+                    logger.warning("%s returned no results, falling through", provider_name)
+                continue
+            payload = {
+                "status": "ok",
+                "query": query,
+                "backends": provider_name,
+                "results": [
+                    {"title": r.get("title", ""), "url": r.get("href", ""), "snippet": r.get("body", "")}
+                    for r in raw
+                ],
+            }
+            payload = with_security_warnings(
+                payload, fields=("results.*.title", "results.*.snippet")
+            )
+            return json.dumps(payload, ensure_ascii=False)
 
         try:
             from ddgs import DDGS

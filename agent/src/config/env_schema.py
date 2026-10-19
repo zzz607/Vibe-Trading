@@ -278,6 +278,7 @@ class DataConfig(_EnvBase):
     vibe_trading_data_cache: EnvBool = Field(alias="VIBE_TRADING_DATA_CACHE", default=False)
     vibe_trading_data_cache_root: str = Field(alias="VIBE_TRADING_DATA_CACHE_ROOT", default="")
     aliyun_iqs_api_key: str = Field(alias="ALIYUN_IQS_API_KEY", default="")
+    bocha_api_key: str = Field(alias="BOCHA_API_KEY", default="")
     qveris_api_key: str = Field(alias="QVERIS_API_KEY", default="")
     qveris_base_url: str = Field(alias="QVERIS_BASE_URL", default="")
     tickerall_api_key: str = Field(alias="TICKERALL_API_KEY", default="")
